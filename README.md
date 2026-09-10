@@ -1,8 +1,8 @@
 # LearnHub
 
-> Aplicativo mobile de plataforma de cursos online, organizados em **trilhas de aprendizagem**.
+> Aplicativo mobile de plataforma de cursos online, organizado em **trilhas de aprendizagem**.
 
-**Status atual:** Etapa 1 — Proposta e Planejamento
+**Status atual:** Etapa 2 — Protótipo funcional de interface
 **Disciplina:** Tecnologia de Construção de Software II
 **Tecnologia mobile:** React Native (Expo)
 
@@ -10,67 +10,68 @@
 
 ## Sobre o projeto
 
-O **LearnHub** é um aplicativo mobile onde o usuário descobre cursos organizados por categorias e por **trilhas de aprendizagem** sequências de cursos conectadas a um objetivo específico (ex.: "me tornar desenvolvedor back-end"). O usuário se matricula, acompanha seu progresso aula a aula, avalia os cursos concluídos, emite certificados e gerencia seu plano de assinatura, tudo em um único app.
+O **LearnHub** é um aplicativo mobile para descoberta e acompanhamento de cursos em trilhas estruturadas. A versão atual apresenta um protótipo funcional com catálogo, cursos em destaque, detalhes do curso, progresso do aluno e planos de assinatura, tudo em uma interface inspirada em plataformas de educação digital.
 
 ### Problema que resolve
 
-Cursos online costumam ser consumidos de forma avulsa e desconectada, sem um caminho estruturado até um objetivo de aprendizado maior. Isso dificulta o acompanhamento de progresso e contribui para a desistência. O LearnHub organiza o aprendizado em trilhas, com progresso e certificação centralizados em um só lugar.
+Cursos online costumam ser consumidos de forma fragmentada e sem acompanhamento claro de progresso. O LearnHub organiza o aprendizado em trilhas, com foco em progresso, clareza visual e experiência de uso mais profissional.
 
-## Funcionalidades previstas
+## Funcionalidades implementadas na etapa 2
 
 | Funcionalidade | Status |
 |---|---|
-| Catálogo de cursos por categoria/trilha | Planejado |
-| Matrícula em cursos e trilhas | Planejado |
-| Player de aula com marcação de progresso | Planejado |
-| Dashboard de progresso do aluno | Planejado |
-| Emissão de certificado | Planejado |
-| Planos de assinatura e checkout | Planejado |
-| Avaliação de cursos | Planejado |
-
-> Nenhuma funcionalidade de código foi implementada ainda esta etapa entrega a **proposta e o planejamento** completo da aplicação. A implementação começa na Etapa 2 e evolui de forma incremental, conforme regras da disciplina.
+| Catálogo de cursos e trilhas | Implementado |
+| Tela inicial com destaque de cursos | Implementado |
+| Detalhes do curso e módulos | Implementado |
+| Visualização de progresso do aluno | Implementado |
+| Planos de assinatura | Implementado |
+| Dados mockados para simulação de fluxo | Implementado |
 
 ## Tecnologias utilizadas
 
 | Camada | Tecnologia |
 |---|---|
 | Mobile | React Native (Expo) |
-| Navegação | React Navigation (Stack + Bottom Tabs) |
-| Backend (planejado) | Node.js + Express + SQLite (Prisma) |
-| Mock de API (fase inicial) | json-server |
-| Persistência local | AsyncStorage |
+| Interface | React Native + componentes customizados |
+| Ícones | lucide-react-native |
+| Dados | Mock local em `src/mockData.js` |
 
 ## Instruções para execução
-
-> Ambiente ainda em configuração inicial (Etapa 1). Comandos abaixo são a previsão de uso a partir da Etapa 2, quando o projeto Expo for inicializado.
 
 ```bash
 # instalar dependências
 npm install
 
-# subir o mock de API (dados de cursos, trilhas, matrículas etc.)
-npm run server
-
-# rodar o app (Expo)
+# iniciar o app
 npm start
 ```
 
+## Validação executada
+
+Foi validado com export do projeto para web:
+
+```bash
+npx expo export --platform web --output-dir dist
+```
+
+Resultado esperado: o projeto compilou com sucesso e gerou a pasta `dist`.
+
 ## Limitações conhecidas
 
-- Backend definitivo ainda não implementado; a etapa inicial usará mock de dados via json-server.
-- Integração com gateway de pagamento ainda não definida/implementada.
-- Estrutura de telas e navegação descritas na proposta, mas ainda não codificadas.
+- Ainda não há backend real integrado.
+- A autenticação e persistência real não foram implementadas nesta etapa.
+- Os dados continuam sendo simulados localmente com dados mockados.
 
 ## Documentação
 
 | Arquivo | Descrição |
 |---|---|
-| [`docs/proposta.md`](docs/proposta.md) | Proposta completa da aplicação (Etapa 1) |
-| `docs/arquitetura.md` | A ser criado nas próximas etapas |
-| `docs/evidencias.md` | A ser criado nas próximas etapas |
+| `proposta.md` | Proposta completa da aplicação |
+| `README.md` | Visão geral do projeto e execução |
 
 ## Entregas
 
 | Etapa | Tag | Conteúdo |
 |---|---|---|
 | Etapa 1 | `etapa-01` | Proposta e planejamento da aplicação |
+| Etapa 2 | `etapa-02` | Protótipo funcional com interface e dados mockados |

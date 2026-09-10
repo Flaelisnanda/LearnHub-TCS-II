@@ -1,0 +1,15 @@
+{
+  "expo": {
+    "name": "LearnHub",
+    "slug": "learnhub-tcs-ii",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "splash": {
+      "backgroundColor": "#f5f7ff"
+    }
+  }
+}
