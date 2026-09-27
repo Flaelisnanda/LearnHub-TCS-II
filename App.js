@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   SafeAreaView,
   ScrollView,
@@ -6,21 +6,22 @@ import {
   Text,
   View,
   TouchableOpacity,
+  TextInput,
+  Platform,
+  BackHandler,
+  AccessibilityInfo,
+  findNodeHandle,
   Image,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import {
-  ArrowRight,
   BadgeCheck,
-  Bell,
   BookOpen,
-  CheckCircle2,
   Clock3,
   Code2,
   Compass,
   CreditCard,
   Palette,
-  PlayCircle,
   Search,
   Sparkles,
   Star,
@@ -43,49 +44,112 @@ const trackIcons = {
   3: Palette,
 };
 
+// Shared control: keyboard focus, touch target and accessible button semantics.
+function Action({ style, children, ...props }) {
+  const [focused, setFocused] = useState(false);
+  return <TouchableOpacity accessibilityRole="button" activeOpacity={0.65}
+    {...props} onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
+    style={[style, { minHeight: 48, minWidth: 48, justifyContent: 'center' },
+      focused && { borderWidth: 2, borderColor: '#111827' }, props.disabled && { opacity: 0.6 }]}>
+    {children}
+  </TouchableOpacity>;
+}
+
 function App() {
-  const [activeTab, setActiveTab] = useState('home');
-  const [selectedCourseId, setSelectedCourseId] = useState(courses[0].id);
+  const initial = { tab: 'home', courseId: courses[0].id };
+  const [history, setHistory] = useState([initial]);
+  const route = history[history.length - 1];
+  const activeTab = route.tab;
+  const selectedCourse = courses.find(course => course.id === route.courseId) || courses[0];
+  const [message, setMessage] = useState('');
+  const [enrolled, setEnrolled] = useState([]);
+  const [completed, setCompleted] = useState({});
+  const [planId, setPlanId] = useState(null);
+  const [query, setQuery] = useState('');
+  const [category, setCategory] = useState('Todos');
+  const heading = useRef(null);
+  const scroll = useRef(null);
+  const title = activeTab === 'details' ? selectedCourse.title : tabs.find(tab => tab.key === activeTab).label;
 
-  const selectedCourse = useMemo(
-    () => courses.find((course) => course.id === selectedCourseId) || courses[0],
-    [selectedCourseId]
-  );
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    window.history.replaceState({ learnhub: [initial] }, '');
+    const restore = event => { setHistory(event.state?.learnhub || [initial]); setMessage(''); };
+    window.addEventListener('popstate', restore);
+    return () => window.removeEventListener('popstate', restore);
+  }, []);
 
-  const renderTabContent = () => {
-    switch (activeTab) {
-      case 'details':
-        return <DetailsScreen course={selectedCourse} onEnroll={() => setActiveTab('progress')} />;
-      case 'progress':
-        return <ProgressScreen />;
-      case 'plans':
-        return <PlansScreen />;
-      default:
-        return <HomeScreen onSelectCourse={setSelectedCourseId} onOpenCourse={() => setActiveTab('details')} />;
-    }
+  const navigate = (tab, courseId = route.courseId) => {
+    if (tab === route.tab && courseId === route.courseId) return;
+    const next = [...history, { tab, courseId }];
+    if (Platform.OS === 'web') window.history.pushState({ learnhub: next }, '');
+    setHistory(next);
+    setMessage('');
+  };
+  const back = () => {
+    if (history.length <= 1) return false;
+    if (Platform.OS === 'web') window.history.back();
+    else setHistory(previous => previous.slice(0, -1));
+    setMessage('');
+    return true;
+  };
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener('hardwareBackPress', back);
+    return () => subscription.remove();
+  }, [history]);
+  useEffect(() => {
+    scroll.current?.scrollTo({ y: 0, animated: false });
+    const timer = setTimeout(() => {
+      if (Platform.OS === 'web') {
+        document.title = `${title} | LearnHub`;
+        heading.current?.focus();
+      } else {
+        const node = findNodeHandle(heading.current);
+        if (node) AccessibilityInfo.setAccessibilityFocus(node);
+      }
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [activeTab, route.courseId]);
+  const notify = text => {
+    setMessage(text);
+    if (Platform.OS !== 'web') AccessibilityInfo.announceForAccessibility(text);
+  };
+  const enroll = () => {
+    setEnrolled(previous => previous.includes(selectedCourse.id) ? previous : [...previous, selectedCourse.id]);
+    navigate('progress');
+    notify(`Matrícula de demonstração em ${selectedCourse.title} confirmada. Nenhuma cobrança realizada.`);
+  };
+  const finishModule = index => {
+    const done = completed[selectedCourse.id] || [];
+    if (done.includes(index)) return;
+    setCompleted(previous => ({ ...previous, [selectedCourse.id]: [...done, index] }));
+    notify(`Módulo ${index + 1} concluído. Seu progresso foi atualizado.`);
   };
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar style="dark" />
       <View style={styles.container}>
-        <Header />
-        <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
-          {renderTabContent()}
+        <View style={styles.header}>
+          <View><Text style={styles.eyebrow}>Plataforma de cursos</Text><Text style={styles.title}>LearnHub</Text></View>
+          {history.length > 1 && <Action style={styles.chip} onPress={back} accessibilityLabel="Voltar para a tela anterior"><Text>← Voltar</Text></Action>}
+        </View>
+        <Text ref={heading} accessible accessibilityRole="header" tabIndex={-1} style={styles.screenHeading}>{title}</Text>
+        <Text accessibilityLiveRegion="polite" style={message ? styles.feedback : { height: 0 }}>{message}</Text>
+        <ScrollView ref={scroll} style={styles.content} contentContainerStyle={styles.contentContainer} keyboardShouldPersistTaps="handled">
+          {activeTab === 'home' && <HomeScreen query={query} setQuery={setQuery} category={category} setCategory={setCategory} onOpenCourse={id => navigate('details', id)} />}
+          {activeTab === 'details' && <DetailsScreen course={selectedCourse} onEnroll={enroll} enrolled={enrolled.includes(selectedCourse.id)} completed={completed[selectedCourse.id] || []} onComplete={finishModule} />}
+          {activeTab === 'progress' && <ProgressScreen enrolled={enrolled} completed={completed} onOpenCourse={id => navigate('details', id)} onExplore={() => navigate('home')} />}
+          {activeTab === 'plans' && <PlansScreen selectedId={planId} onSelect={plan => { setPlanId(plan.id); notify(`Plano ${plan.name} selecionado para demonstração. Nenhuma assinatura ou cobrança realizada.`); }} />}
         </ScrollView>
         <View style={styles.tabBar}>
-          {tabs.map((tab) => {
+          {tabs.map(tab => {
             const Icon = tab.icon;
-            return (
-              <TouchableOpacity
-                key={tab.key}
-                style={[styles.tabButton, activeTab === tab.key && styles.tabButtonActive]}
-                onPress={() => setActiveTab(tab.key)}
-              >
-                <Icon size={18} color={activeTab === tab.key ? '#5b4ef5' : '#6b7280'} />
-                <Text style={[styles.tabText, activeTab === tab.key && styles.tabTextActive]}>{tab.label}</Text>
-              </TouchableOpacity>
-            );
+            return <Action key={tab.key} accessibilityLabel={tab.label} accessibilityState={{ selected: activeTab === tab.key }}
+              style={[styles.tabButton, activeTab === tab.key && styles.tabButtonActive]} onPress={() => navigate(tab.key)}>
+              <Icon accessible={false} aria-hidden={true} size={18} color={activeTab === tab.key ? '#5b4ef5' : '#4b5563'} />
+              <Text style={[styles.tabText, activeTab === tab.key && styles.tabTextActive]}>{tab.label}</Text>
+            </Action>;
           })}
         </View>
       </View>
@@ -93,26 +157,12 @@ function App() {
   );
 }
 
-function Header() {
-  return (
-    <View style={styles.header}>
-      <View>
-        <Text style={styles.eyebrow}>Plataforma</Text>
-        <Text style={styles.title}>LearnHub</Text>
-      </View>
-      <View style={styles.headerActions}>
-        <TouchableOpacity style={styles.iconButton}>
-          <Bell size={18} color="#111827" />
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.avatarButton}>
-          <Text style={styles.avatarText}>L</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
+function HomeScreen({ onOpenCourse, query, setQuery, category, setCategory }) {
+  const normalize = text => text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const visibleCourses = courses.filter(course =>
+    (category === 'Todos' || course.category === category) &&
+    normalize(`${course.title} ${course.category} ${course.description}`).includes(normalize(query.trim()))
   );
-}
-
-function HomeScreen({ onSelectCourse, onOpenCourse }) {
   return (
     <View>
       <View style={styles.heroCard}>
@@ -122,52 +172,52 @@ function HomeScreen({ onSelectCourse, onOpenCourse }) {
         <Text style={styles.heroLabel}>Seu caminho de aprendizado</Text>
         <Text style={styles.heroTitle}>Aprenda com trilhas estruturadas</Text>
         <Text style={styles.heroSubtitle}>Descubra cursos pensados para te levar da base ao próximo nível com clareza e progressão real.</Text>
-        <TouchableOpacity style={styles.primaryButton} onPress={() => { onSelectCourse(courses[0].id); onOpenCourse(); }}>
+        <Action style={styles.primaryButton} onPress={() => onOpenCourse(courses[0].id)}>
           <Text style={styles.primaryButtonText}>Ver curso em destaque</Text>
-        </TouchableOpacity>
+        </Action>
       </View>
 
       <View style={styles.searchBar}>
         <Search size={16} color="#9ca3af" />
-        <Text style={styles.searchPlaceholder}>Buscar cursos ou trilhas</Text>
+        <TextInput accessibilityLabel="Buscar cursos" placeholder="Buscar cursos" placeholderTextColor="#4b5563" value={query} onChangeText={setQuery} style={styles.searchInput} />
       </View>
 
       <View style={styles.chipRow}>
-        {['Todos', 'Mobile', 'Backend', 'UX'].map((item) => (
-          <View key={item} style={[styles.chip, item === 'Todos' && styles.chipActive]}>
-            <Text style={[styles.chipText, item === 'Todos' && styles.chipTextActive]}>{item}</Text>
-          </View>
+        {['Todos', 'Mobile', 'Backend', 'UI/UX'].map((item) => (
+          <Action key={item} accessibilityLabel={`Filtrar: ${item}`} accessibilityState={{ selected: item === category }} onPress={() => setCategory(item)} style={[styles.chip, item === category && styles.chipActive]}>
+            <Text style={[styles.chipText, item === category && styles.chipTextActive]}>{item}</Text>
+          </Action>
         ))}
       </View>
 
-      <Text style={styles.sectionTitle}>Trilhas populares</Text>
+      <Text accessibilityRole="header" style={styles.sectionTitle}>Trilhas populares</Text>
       {tracks.map((track) => {
         const Icon = trackIcons[track.id] || Compass;
         return (
-          <TouchableOpacity key={track.id} style={styles.trackCard}>
+          <Action key={track.id} style={styles.trackCard} accessibilityLabel={`Explorar trilha ${track.name}`} onPress={() => { setQuery(''); setCategory(track.id === 1 ? 'Mobile' : track.id === 2 ? 'Backend' : 'UI/UX'); }}>
             <View style={styles.trackHeader}>
               <View style={[styles.trackBadge, { backgroundColor: track.color }]}>
                 <Icon size={16} color="#fff" />
               </View>
-              <Text style={styles.trackMeta}>{track.courses} cursos</Text>
+              <Text style={styles.trackMeta}>1 curso disponível</Text>
             </View>
             <Text style={styles.trackName}>{track.name}</Text>
             <Text style={styles.trackDescription}>{track.description}</Text>
-          </TouchableOpacity>
+          </Action>
         );
       })}
 
-      <Text style={styles.sectionTitle}>Cursos em alta</Text>
-      {courses.map((course) => (
-        <TouchableOpacity
+      <Text accessibilityRole="header" style={styles.sectionTitle}>Cursos disponíveis</Text>
+      <Text accessibilityLiveRegion="polite" style={styles.description}>{visibleCourses.length} curso(s) encontrado(s) — {category}</Text>
+      {visibleCourses.length === 0 && <View style={styles.progressCard}><Text style={styles.description}>Nenhum curso encontrado. Tente outro termo ou limpe os filtros.</Text><Action style={styles.secondaryButton} onPress={() => { setQuery(''); setCategory('Todos'); }}><Text style={styles.secondaryButtonText}>Limpar filtros</Text></Action></View>}
+      {visibleCourses.map((course) => (
+        <Action
           key={course.id}
           style={styles.courseCard}
-          onPress={() => {
-            onSelectCourse(course.id);
-            onOpenCourse();
-          }}
+          accessibilityLabel={`Ver curso: ${course.title}`}
+          onPress={() => onOpenCourse(course.id)}
         >
-          <Image source={{ uri: course.image }} style={styles.courseImage} />
+          <Image accessible={false} accessibilityIgnoresInvertColors source={{ uri: course.image }} style={styles.courseImage} />
           <View style={styles.courseContent}>
             <View style={styles.courseTopRow}>
               <Text style={styles.courseCategory}>{course.category}</Text>
@@ -186,16 +236,16 @@ function HomeScreen({ onSelectCourse, onOpenCourse }) {
               <Text style={styles.coursePrice}>{course.price}</Text>
             </View>
           </View>
-        </TouchableOpacity>
+        </Action>
       ))}
     </View>
   );
 }
 
-function DetailsScreen({ course, onEnroll }) {
+function DetailsScreen({ course, onEnroll, enrolled, completed, onComplete }) {
   return (
     <View>
-      <Image source={{ uri: course.image }} style={styles.detailsImage} />
+      <Image accessible={false} accessibilityIgnoresInvertColors source={{ uri: course.image }} style={styles.detailsImage} />
       <Text style={styles.detailsCategory}>{course.category}</Text>
       <Text style={styles.detailsTitle}>{course.title}</Text>
       <Text style={styles.detailsAuthor}>Instrutor: {course.author}</Text>
@@ -215,16 +265,17 @@ function DetailsScreen({ course, onEnroll }) {
         </View>
       </View>
 
-      <Text style={styles.sectionTitle}>Sobre o curso</Text>
+      <Text accessibilityRole="header" style={styles.sectionTitle}>Sobre o curso</Text>
       <Text style={styles.description}>{course.description}</Text>
 
-      <Text style={styles.sectionTitle}>Módulos</Text>
+      <Text accessibilityRole="header" style={styles.sectionTitle}>Módulos</Text>
       {course.modules.map((module, index) => (
         <View key={module} style={styles.moduleItem}>
           <View style={styles.moduleNumberWrap}>
             <Text style={styles.moduleNumber}>{index + 1}</Text>
           </View>
           <Text style={styles.moduleText}>{module}</Text>
+          {enrolled && <Action accessibilityLabel={`${completed.includes(index) ? 'Concluído' : 'Concluir módulo'}: ${module}`} accessibilityState={{ disabled: completed.includes(index) }} disabled={completed.includes(index)} style={styles.chip} onPress={() => onComplete(index)}><Text>{completed.includes(index) ? '✓ Concluído' : 'Concluir'}</Text></Action>}
         </View>
       ))}
 
@@ -233,50 +284,39 @@ function DetailsScreen({ course, onEnroll }) {
           <Text style={styles.priceLabel}>Preço</Text>
           <Text style={styles.priceText}>{course.price}</Text>
         </View>
-        <TouchableOpacity style={styles.primaryButton} onPress={onEnroll}>
-          <Text style={styles.primaryButtonText}>Matricular-se</Text>
-        </TouchableOpacity>
+        <Action style={styles.primaryButton} onPress={onEnroll}>
+          <Text style={styles.primaryButtonText}>{enrolled ? 'Ver meu progresso' : 'Matricular-se (demo)'}</Text>
+        </Action>
       </View>
     </View>
   );
 }
 
-function ProgressScreen() {
-  return (
-    <View>
-      <Text style={styles.sectionTitle}>Meu progresso</Text>
-      <View style={styles.summaryRow}>
-        <View style={styles.summaryCard}>
-          <BookOpen size={16} color="#5b4ef5" />
-          <Text style={styles.summaryValue}>7</Text>
-          <Text style={styles.summaryLabel}>cursos</Text>
-        </View>
-        <View style={styles.summaryCard}>
-          <TrendingUp size={16} color="#5b4ef5" />
-          <Text style={styles.summaryValue}>64%</Text>
-          <Text style={styles.summaryLabel}>média</Text>
-        </View>
-      </View>
-
-      {courses.map((course) => (
-        <View key={course.id} style={styles.progressCard}>
-          <View style={styles.progressHeader}>
-            <Text style={styles.progressTitle}>{course.title}</Text>
-            <Text style={styles.progressPercent}>{course.progress}%</Text>
-          </View>
-          <View style={styles.progressBarBackground}>
-            <View style={[styles.progressBarFill, { width: `${course.progress}%` }]} />
-          </View>
-        </View>
-      ))}
+function ProgressScreen({ enrolled, completed, onOpenCourse, onExplore }) {
+  const learning = courses.filter(course => enrolled.includes(course.id));
+  const percentage = course => Math.round(((completed[course.id] || []).length / course.modules.length) * 100);
+  const average = learning.length ? Math.round(learning.reduce((total, course) => total + percentage(course), 0) / learning.length) : 0;
+  return <View>
+    <Text accessibilityRole="header" style={styles.sectionTitle}>Meu progresso</Text>
+    <Text style={styles.description}>Demonstração: matrículas e conclusões ficam disponíveis durante esta sessão.</Text>
+    <View style={styles.summaryRow}>
+      <View style={styles.summaryCard}><Text style={styles.summaryValue}>{learning.length}</Text><Text style={styles.summaryLabel}>cursos matriculados</Text></View>
+      <View style={styles.summaryCard}><Text style={styles.summaryValue}>{average}%</Text><Text style={styles.summaryLabel}>progresso médio</Text></View>
     </View>
-  );
+    {!learning.length && <View style={styles.progressCard}><Text style={styles.description}>Você ainda não se matriculou. Escolha um curso para começar.</Text><Action style={styles.primaryButton} onPress={onExplore}><Text style={styles.primaryButtonText}>Explorar cursos</Text></Action></View>}
+    {learning.map(course => <View key={course.id} style={styles.progressCard}>
+      <Text style={styles.progressTitle}>{course.title}</Text>
+      <Text style={styles.description}>{percentage(course)}% concluído</Text>
+      <View accessibilityRole="progressbar" accessibilityLabel={`Progresso em ${course.title}`} accessibilityValue={{ min: 0, max: 100, now: percentage(course) }} style={styles.progressBarBackground}><View style={[styles.progressBarFill, { width: `${percentage(course)}%` }]} /></View>
+      <Action style={[styles.secondaryButton, { marginTop: 16 }]} onPress={() => onOpenCourse(course.id)} accessibilityLabel={`Abrir módulos de ${course.title}`}><Text style={styles.secondaryButtonText}>Abrir módulos</Text></Action>
+    </View>)}
+  </View>;
 }
 
-function PlansScreen() {
+function PlansScreen({ selectedId, onSelect }) {
   return (
     <View>
-      <Text style={styles.sectionTitle}>Planos do LearnHub</Text>
+      <Text accessibilityRole="header" style={styles.sectionTitle}>Planos do LearnHub</Text>
       {plans.map((plan) => (
         <View key={plan.id} style={styles.planCard}>
           <View style={styles.planHeader}>
@@ -285,9 +325,9 @@ function PlansScreen() {
           </View>
           <Text style={styles.planPrice}>{plan.price}</Text>
           <Text style={styles.planDescription}>{plan.description}</Text>
-          <TouchableOpacity style={styles.secondaryButton}>
-            <Text style={styles.secondaryButtonText}>Escolher plano</Text>
-          </TouchableOpacity>
+          <Action style={styles.secondaryButton} accessibilityLabel={`Selecionar plano ${plan.name} (demonstração)`} accessibilityState={{ selected: selectedId === plan.id }} onPress={() => onSelect(plan)}>
+            <Text style={styles.secondaryButtonText}>{selectedId === plan.id ? '✓ Plano selecionado' : 'Escolher plano (demo)'}</Text>
+          </Action>
         </View>
       ))}
     </View>
@@ -295,12 +335,18 @@ function PlansScreen() {
 }
 
 const styles = StyleSheet.create({
+  screenHeading: { fontSize: 22, fontWeight: '700', color: '#111827', paddingHorizontal: 20, marginBottom: 12 },
+  feedback: { backgroundColor: '#dcfce7', color: '#14532d', padding: 16, marginHorizontal: 20, marginBottom: 12, borderRadius: 12, fontSize: 16 },
+  searchInput: { flex: 1, minHeight: 48, color: '#111827', fontSize: 16 },
   safeArea: {
     flex: 1,
     backgroundColor: '#f6f7fb',
   },
   container: {
     flex: 1,
+    width: '100%',
+    maxWidth: 800,
+    alignSelf: 'center',
     backgroundColor: '#f6f7fb',
   },
   header: {
@@ -327,8 +373,8 @@ const styles = StyleSheet.create({
     borderColor: '#edf2f7',
   },
   eyebrow: {
-    fontSize: 12,
-    color: '#6b7280',
+    fontSize: 14,
+    color: '#4b5563',
     letterSpacing: 0.5,
   },
   title: {
@@ -373,7 +419,7 @@ const styles = StyleSheet.create({
   },
   heroLabel: {
     color: '#5b4ef5',
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: '700',
     marginBottom: 8,
     textTransform: 'uppercase',
@@ -392,6 +438,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   primaryButton: {
+    paddingHorizontal: 16,
     backgroundColor: '#5b4ef5',
     borderRadius: 12,
     paddingVertical: 12,
@@ -422,6 +469,7 @@ const styles = StyleSheet.create({
   },
   chipRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 10,
     marginBottom: 20,
   },
@@ -439,7 +487,7 @@ const styles = StyleSheet.create({
   },
   chipText: {
     color: '#374151',
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: '600',
   },
   chipTextActive: {
@@ -486,13 +534,13 @@ const styles = StyleSheet.create({
   },
   trackDescription: {
     color: '#4b5563',
-    fontSize: 13,
+    fontSize: 14,
     lineHeight: 18,
   },
   trackMeta: {
-    color: '#6b7280',
+    color: '#4b5563',
     fontWeight: '600',
-    fontSize: 12,
+    fontSize: 14,
   },
   courseCard: {
     backgroundColor: '#fff',
@@ -522,7 +570,7 @@ const styles = StyleSheet.create({
   courseCategory: {
     color: '#5b4ef5',
     fontWeight: '700',
-    fontSize: 12,
+    fontSize: 14,
   },
   ratingPill: {
     flexDirection: 'row',
@@ -540,8 +588,8 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   courseAuthor: {
-    color: '#6b7280',
-    fontSize: 12,
+    color: '#4b5563',
+    fontSize: 14,
     marginBottom: 12,
   },
   courseMetaRow: {
@@ -556,7 +604,7 @@ const styles = StyleSheet.create({
   },
   metaText: {
     color: '#374151',
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: '600',
   },
   coursePrice: {
@@ -573,7 +621,7 @@ const styles = StyleSheet.create({
   detailsCategory: {
     color: '#5b4ef5',
     fontWeight: '700',
-    fontSize: 12,
+    fontSize: 14,
     marginBottom: 8,
   },
   detailsTitle: {
@@ -599,6 +647,8 @@ const styles = StyleSheet.create({
     marginBottom: 18,
   },
   moduleItem: {
+    flexWrap: 'wrap',
+    gap: 8,
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#fff',
@@ -620,7 +670,7 @@ const styles = StyleSheet.create({
   moduleNumber: {
     color: '#5b4ef5',
     fontWeight: '700',
-    fontSize: 12,
+    fontSize: 14,
   },
   moduleText: {
     color: '#111827',
@@ -628,6 +678,8 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   priceCard: {
+    flexWrap: 'wrap',
+    gap: 16,
     backgroundColor: '#f4f5ff',
     borderRadius: 18,
     padding: 18,
@@ -637,8 +689,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   priceLabel: {
-    color: '#6b7280',
-    fontSize: 12,
+    color: '#4b5563',
+    fontSize: 14,
     marginBottom: 4,
   },
   priceText: {
@@ -668,8 +720,8 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   summaryLabel: {
-    color: '#6b7280',
-    fontSize: 12,
+    color: '#4b5563',
+    fontSize: 14,
   },
   progressCard: {
     backgroundColor: '#fff',
@@ -764,9 +816,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#f3f1ff',
   },
   tabText: {
-    color: '#6b7280',
+    color: '#4b5563',
     fontWeight: '600',
-    fontSize: 11,
+    fontSize: 14,
   },
   tabTextActive: {
     color: '#5b4ef5',

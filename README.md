@@ -1,77 +1,49 @@
 # LearnHub
 
-> Aplicativo mobile de plataforma de cursos online, organizado em **trilhas de aprendizagem**.
+Aplicativo de cursos e trilhas de aprendizagem desenvolvido em React Native com Expo para Tecnologia de Construção de Software II.
 
-**Status atual:** Etapa 2 — Protótipo funcional de interface
-**Disciplina:** Tecnologia de Construção de Software II
-**Tecnologia mobile:** React Native (Expo)
+**Status: Etapa 3 — Navegação, UX e acessibilidade.**
 
----
+## Funcionalidades
 
-## Sobre o projeto
+- Catálogo com busca, filtros por categoria e acesso por trilhas.
+- Detalhes do curso, matrícula de demonstração e conclusão manual de módulos.
+- Progresso calculado a partir das conclusões da sessão.
+- Seleção de planos de demonstração com feedback explícito.
+- Barra inferior, botão Voltar, histórico do navegador e retorno físico do Android.
+- Controles com alvos mínimos de 48 unidades, foco visível, rótulos acessíveis e mensagens para leitores de tela.
 
-O **LearnHub** é um aplicativo mobile para descoberta e acompanhamento de cursos em trilhas estruturadas. A versão atual apresenta um protótipo funcional com catálogo, cursos em destaque, detalhes do curso, progresso do aluno e planos de assinatura, tudo em uma interface inspirada em plataformas de educação digital.
+## Executar
 
-### Problema que resolve
-
-Cursos online costumam ser consumidos de forma fragmentada e sem acompanhamento claro de progresso. O LearnHub organiza o aprendizado em trilhas, com foco em progresso, clareza visual e experiência de uso mais profissional.
-
-## Funcionalidades implementadas na etapa 2
-
-| Funcionalidade | Status |
-|---|---|
-| Catálogo de cursos e trilhas | Implementado |
-| Tela inicial com destaque de cursos | Implementado |
-| Detalhes do curso e módulos | Implementado |
-| Visualização de progresso do aluno | Implementado |
-| Planos de assinatura | Implementado |
-| Dados mockados para simulação de fluxo | Implementado |
-
-## Tecnologias utilizadas
-
-| Camada | Tecnologia |
-|---|---|
-| Mobile | React Native (Expo) |
-| Interface | React Native + componentes customizados |
-| Ícones | lucide-react-native |
-| Dados | Mock local em `src/mockData.js` |
-
-## Instruções para execução
+Requer Node.js e npm compatíveis com Expo SDK 51.
 
 ```bash
-# instalar dependências
 npm install
-
-# iniciar o app
-npm start
+npm run web
 ```
 
-## Validação executada
-
-Foi validado com export do projeto para web:
+Para desenvolvimento mobile, use `npm start` com cliente Expo compatível com SDK 51 ou emulador configurado. Para gerar a versão web:
 
 ```bash
 npx expo export --platform web --output-dir dist
 ```
 
-Resultado esperado: o projeto compilou com sucesso e gerou a pasta `dist`.
+Edite `App.js` e `src/mockData.js`. A pasta `dist` contém arquivos gerados pelo export; não é o código-fonte principal.
 
-## Limitações conhecidas
+## Documentação e testes
 
-- Ainda não há backend real integrado.
-- A autenticação e persistência real não foram implementadas nesta etapa.
-- Os dados continuam sendo simulados localmente com dados mockados.
+Consulte [a documentação da Etapa 3](docs/etapa-03.md) para estrutura de navegação, decisões de UX, acessibilidade e roteiro de teste. A [proposta](proposta.md) apresenta o planejamento inicial.
 
-## Documentação
-
-| Arquivo | Descrição |
-|---|---|
-| `proposta.md` | Proposta completa da aplicação |
-| `README.md` | Visão geral do projeto e execução |
+O projeto utiliza React Native, Expo, React Native Web e lucide-react-native. Os dados são locais, sem backend ou autenticação. Matrículas, conclusões e plano selecionado existem apenas durante a sessão; não há cobrança, aulas reais ou persistência após recarregar.
 
 ## Entregas
 
-| Etapa | Tag | Conteúdo |
-|---|---|---|
-| Etapa 1 | `etapa-01` | Proposta e planejamento da aplicação |
-| Etapa 2 | `etapa-02` | Protótipo funcional com interface e dados mockados |
+| Etapa | Identificação prevista | Conteúdo |
+| --- | --- | --- |
+| 1 | `etapa-01` | Proposta e planejamento |
+| 2 | `etapa-02` | Protótipo de interface |
+| 3 | `etapa-03` | Navegação, UX e acessibilidade |
+
+Repositório: https://github.com/Flaelisnanda/LearnHub-TCS-II
+
+Os comandos para registrar e publicar a entrega estão na documentação da Etapa 3.
