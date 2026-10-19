@@ -1,6 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import {
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -8,12 +7,14 @@ import {
   TouchableOpacity,
   TextInput,
   Platform,
-  BackHandler,
   AccessibilityInfo,
   findNodeHandle,
   Image,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { NavigationContainer, useIsFocused } from '@react-navigation/native';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import {
   BadgeCheck,
   BookOpen,
@@ -30,6 +31,7 @@ import {
   Users,
 } from 'lucide-react-native';
 import { courses, tracks, plans } from './src/mockData';
+import { useLearningStorage } from './src/useLearningStorage';
 
 const tabs = [
   { key: 'home', label: 'Início', icon: Compass },
@@ -45,61 +47,77 @@ const trackIcons = {
 };
 
 // Shared control: keyboard focus, touch target and accessible button semantics.
-function Action({ style, children, ...props }) {
+function Action({ style, children, onFocus, onBlur, ...props }) {
   const [focused, setFocused] = useState(false);
+  const learning = useContext(LearningContext);
+  const disabled = props.disabled || learning?.busy;
   return <TouchableOpacity accessibilityRole="button" activeOpacity={0.65}
-    {...props} onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
-    style={[style, { minHeight: 48, minWidth: 48, justifyContent: 'center' },
-      focused && { borderWidth: 2, borderColor: '#111827' }, props.disabled && { opacity: 0.6 }]}>
+    {...props} disabled={disabled} onFocus={(event) => { setFocused(true); onFocus?.(event); }} onBlur={(event) => { setFocused(false); onBlur?.(event); }}
+    style={[style, styles.touchTarget, focused && styles.focusRing, disabled && styles.disabledControl]}>
     {children}
   </TouchableOpacity>;
 }
 
+function announce(text) {
+  if (Platform.OS === 'ios') {
+    AccessibilityInfo.announceForAccessibilityWithOptions(text, { queue: true });
+  } else if (Platform.OS !== 'web') {
+    AccessibilityInfo.announceForAccessibility(text);
+  }
+}
+
+const Stack = createNativeStackNavigator();
+const LearningContext = createContext(null);
+const linking = {
+  prefixes: [],
+  config: { screens: { home: '', details: 'curso/:courseId', progress: 'progresso', plans: 'planos', help: 'ajuda' } },
+};
+
 function App() {
-  const initial = { tab: 'home', courseId: courses[0].id };
-  const [history, setHistory] = useState([initial]);
-  const route = history[history.length - 1];
-  const activeTab = route.tab;
-  const selectedCourse = courses.find(course => course.id === route.courseId) || courses[0];
-  const [message, setMessage] = useState('');
-  const [enrolled, setEnrolled] = useState([]);
-  const [completed, setCompleted] = useState({});
-  const [planId, setPlanId] = useState(null);
+  const storage = useLearningStorage();
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('Todos');
+  if (!storage.ready) return <SafeAreaProvider><SafeAreaView style={styles.safeArea}>
+    <Text accessibilityRole="header" style={styles.screenHeading}>LearnHub</Text>
+    <Text accessibilityLiveRegion="polite" style={styles.description}>{storage.error || 'Carregando dados salvos...'}</Text>
+    {storage.error && <Action style={styles.secondaryButton} onPress={storage.reload}><Text style={styles.secondaryButtonText}>Tentar carregar novamente</Text></Action>}
+  </SafeAreaView></SafeAreaProvider>;
+  return <SafeAreaProvider>
+    <LearningContext.Provider value={{ ...storage, query, setQuery, category, setCategory }}>
+      <NavigationContainer linking={linking}>
+        <Stack.Navigator initialRouteName="home" screenOptions={{ headerShown: false, gestureEnabled: true, fullScreenGestureEnabled: false }}>
+          {['home', 'details', 'progress', 'plans', 'help'].map(name => <Stack.Screen key={name} name={name} component={LearningScreen} />)}
+        </Stack.Navigator>
+      </NavigationContainer>
+    </LearningContext.Provider>
+  </SafeAreaProvider>;
+}
+
+function LearningScreen({ route, navigation }) {
+  const { data: { enrolled, completed, planId }, update, busy, error, query, setQuery, category, setCategory } = useContext(LearningContext);
+  const activeTab = route.name;
+  const courseId = route.params?.courseId ?? courses[0].id;
+  const selectedCourse = courses.find(course => String(course.id) === String(courseId)) || courses[0];
+  const [message, setMessage] = useState(route.params?.confirmation || '');
+  const isFocused = useIsFocused();
   const heading = useRef(null);
   const scroll = useRef(null);
-  const title = activeTab === 'details' ? selectedCourse.title : tabs.find(tab => tab.key === activeTab).label;
+  const title = activeTab === 'help' ? 'Ajuda de acessibilidade' : activeTab === 'details' ? selectedCourse.title : tabs.find(tab => tab.key === activeTab).label;
 
-  useEffect(() => {
-    if (Platform.OS !== 'web') return;
-    window.history.replaceState({ learnhub: [initial] }, '');
-    const restore = event => { setHistory(event.state?.learnhub || [initial]); setMessage(''); };
-    window.addEventListener('popstate', restore);
-    return () => window.removeEventListener('popstate', restore);
-  }, []);
-
-  const navigate = (tab, courseId = route.courseId) => {
-    if (tab === route.tab && courseId === route.courseId) return;
-    const next = [...history, { tab, courseId }];
-    if (Platform.OS === 'web') window.history.pushState({ learnhub: next }, '');
-    setHistory(next);
+  const navigate = (tab, nextCourseId = courseId, confirmation) => {
+    if (tab === activeTab && String(nextCourseId) === String(courseId)) return;
     setMessage('');
+    navigation.push(tab, { courseId: nextCourseId, confirmation });
   };
   const back = () => {
-    if (history.length <= 1) return false;
-    if (Platform.OS === 'web') window.history.back();
-    else setHistory(previous => previous.slice(0, -1));
-    setMessage('');
-    return true;
+    if (navigation.canGoBack()) navigation.goBack();
   };
   useEffect(() => {
-    const subscription = BackHandler.addEventListener('hardwareBackPress', back);
-    return () => subscription.remove();
-  }, [history]);
-  useEffect(() => {
-    scroll.current?.scrollTo({ y: 0, animated: false });
-    const timer = setTimeout(() => {
+    if (!isFocused) return;
+    let focused = false;
+    const focusHeading = () => {
+      if (focused) return;
+      focused = true;
       if (Platform.OS === 'web') {
         document.title = `${title} | LearnHub`;
         heading.current?.focus();
@@ -107,23 +125,31 @@ function App() {
         const node = findNodeHandle(heading.current);
         if (node) AccessibilityInfo.setAccessibilityFocus(node);
       }
-    }, 100);
-    return () => clearTimeout(timer);
-  }, [activeTab, route.courseId]);
+    };
+    // Wait for the native transition before moving VoiceOver to the title.
+    const unsubscribe = navigation.addListener('transitionEnd', focusHeading);
+    const timer = setTimeout(focusHeading, 600);
+    return () => { clearTimeout(timer); unsubscribe(); };
+  }, [isFocused, navigation, title]);
   const notify = text => {
     setMessage(text);
-    if (Platform.OS !== 'web') AccessibilityInfo.announceForAccessibility(text);
+    announce(text);
   };
-  const enroll = () => {
-    setEnrolled(previous => previous.includes(selectedCourse.id) ? previous : [...previous, selectedCourse.id]);
-    navigate('progress');
-    notify(`Matrícula de demonstração em ${selectedCourse.title} confirmada. Nenhuma cobrança realizada.`);
+  const enroll = async () => {
+    if (enrolled.includes(selectedCourse.id)) {
+      navigate('progress');
+      return;
+    }
+    if (!await update(previous => ({ ...previous, enrolled: [...previous.enrolled, selectedCourse.id] }))) return;
+    navigate('progress', courseId, `Matrícula de demonstração em ${selectedCourse.title} confirmada. Nenhuma cobrança realizada.`);
   };
-  const finishModule = index => {
+  const finishModule = async index => {
     const done = completed[selectedCourse.id] || [];
     if (done.includes(index)) return;
-    setCompleted(previous => ({ ...previous, [selectedCourse.id]: [...done, index] }));
-    notify(`Módulo ${index + 1} concluído. Seu progresso foi atualizado.`);
+    if (!enrolled.includes(selectedCourse.id)) return;
+    if (!await update(previous => ({ ...previous, completed: { ...previous.completed, [selectedCourse.id]: [...done, index] } }))) return;
+    const percent = Math.round(((done.length + 1) / selectedCourse.modules.length) * 100);
+    notify(`Módulo ${index + 1}, ${selectedCourse.modules[index]}, concluído. Progresso: ${percent} por cento.${percent === 100 ? ' Todos os módulos foram concluídos!' : ''}`);
   };
 
   return (
@@ -132,22 +158,31 @@ function App() {
       <View style={styles.container}>
         <View style={styles.header}>
           <View><Text style={styles.eyebrow}>Plataforma de cursos</Text><Text style={styles.title}>LearnHub</Text></View>
-          {history.length > 1 && <Action style={styles.chip} onPress={back} accessibilityLabel="Voltar para a tela anterior"><Text>← Voltar</Text></Action>}
+          {navigation.canGoBack() && <Action style={styles.chip} onPress={back} accessibilityLabel="Voltar para a tela anterior"><Text>← Voltar</Text></Action>}
         </View>
-        <Text ref={heading} accessible accessibilityRole="header" tabIndex={-1} style={styles.screenHeading}>{title}</Text>
-        <Text accessibilityLiveRegion="polite" style={message ? styles.feedback : { height: 0 }}>{message}</Text>
+        <Text ref={heading} accessible accessibilityRole="header" accessibilityLabel={message ? `${title}. ${message}` : title} tabIndex={-1} style={styles.screenHeading}>{title}</Text>
+        <Text accessibilityLiveRegion={Platform.OS === 'web' ? 'polite' : 'none'} style={message ? styles.feedback : { height: 0 }}>{message}</Text>
+        <Text accessibilityLiveRegion="polite" style={styles.description}>{error || (busy ? 'Salvando dados...' : 'Dados salvos neste dispositivo.')}</Text>
         <ScrollView ref={scroll} style={styles.content} contentContainerStyle={styles.contentContainer} keyboardShouldPersistTaps="handled">
-          {activeTab === 'home' && <HomeScreen query={query} setQuery={setQuery} category={category} setCategory={setCategory} onOpenCourse={id => navigate('details', id)} />}
+          {activeTab !== 'help' && <Action style={[styles.secondaryButton, { marginBottom: 16 }]} onPress={() => navigate('help')} accessibilityLabel="Ajuda de acessibilidade" accessibilityHint="Abre instruções para usar o aplicativo com leitor de tela"><Text style={styles.secondaryButtonText}>Como usar o aplicativo</Text></Action>}
+          {activeTab === 'help' && <HelpScreen onExplore={() => navigate('home')} />}
+          {activeTab === 'home' && <HomeScreen isFocused={isFocused} query={query} setQuery={setQuery} category={category} setCategory={setCategory} onOpenCourse={id => navigate('details', id)} />}
           {activeTab === 'details' && <DetailsScreen course={selectedCourse} onEnroll={enroll} enrolled={enrolled.includes(selectedCourse.id)} completed={completed[selectedCourse.id] || []} onComplete={finishModule} />}
-          {activeTab === 'progress' && <ProgressScreen enrolled={enrolled} completed={completed} onOpenCourse={id => navigate('details', id)} onExplore={() => navigate('home')} />}
-          {activeTab === 'plans' && <PlansScreen selectedId={planId} onSelect={plan => { setPlanId(plan.id); notify(`Plano ${plan.name} selecionado para demonstração. Nenhuma assinatura ou cobrança realizada.`); }} />}
+          {activeTab === 'progress' && <ProgressScreen onRemove={async id => {
+            if (await update(previous => {
+              const nextCompleted = { ...previous.completed };
+              delete nextCompleted[id];
+              return { ...previous, enrolled: previous.enrolled.filter(value => value !== id), completed: nextCompleted };
+            })) notify('Matrícula e progresso removidos deste dispositivo.');
+          }} enrolled={enrolled} completed={completed} onOpenCourse={id => navigate('details', id)} onExplore={() => navigate('home')} />}
+          {activeTab === 'plans' && <PlansScreen selectedId={planId} onSelect={async plan => { if (!await update(previous => ({ ...previous, planId: plan.id }))) return; notify(`Plano ${plan.name} selecionado para demonstração. Nenhuma assinatura ou cobrança realizada.`); }} />}
         </ScrollView>
         <View style={styles.tabBar}>
           {tabs.map(tab => {
             const Icon = tab.icon;
             return <Action key={tab.key} accessibilityLabel={tab.label} accessibilityState={{ selected: activeTab === tab.key }}
               style={[styles.tabButton, activeTab === tab.key && styles.tabButtonActive]} onPress={() => navigate(tab.key)}>
-              <Icon accessible={false} aria-hidden={true} size={18} color={activeTab === tab.key ? '#5b4ef5' : '#4b5563'} />
+              <Icon accessible={false} importantForAccessibility="no" size={18} color={activeTab === tab.key ? '#4f46e5' : '#374151'} />
               <Text style={[styles.tabText, activeTab === tab.key && styles.tabTextActive]}>{tab.label}</Text>
             </Action>;
           })}
@@ -157,34 +192,50 @@ function App() {
   );
 }
 
-function HomeScreen({ onOpenCourse, query, setQuery, category, setCategory }) {
+function HomeScreen({ isFocused, onOpenCourse, query, setQuery, category, setCategory }) {
   const normalize = text => text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
   const visibleCourses = courses.filter(course =>
     (category === 'Todos' || course.category === category) &&
     normalize(`${course.title} ${course.category} ${course.description}`).includes(normalize(query.trim()))
   );
+  const lastFilters = useRef({ query, category });
+  const [searchFeedback, setSearchFeedback] = useState('');
+  useEffect(() => {
+    if (!isFocused) return;
+    if (lastFilters.current.query === query && lastFilters.current.category === category) return;
+    const timer = setTimeout(() => {
+      const feedback = visibleCourses.length
+        ? `${visibleCourses.length} curso(s) encontrado(s) na categoria ${category}. Os resultados estão após as trilhas populares.`
+        : 'Nenhum curso encontrado. Tente outro termo ou use Limpar filtros.';
+      lastFilters.current = { query, category };
+      setSearchFeedback(feedback);
+      announce(feedback);
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [isFocused, query, category, visibleCourses.length]);
   return (
     <View>
+      <Text style={styles.description}>Busque um curso ou escolha uma categoria. Abra um curso para conhecer os detalhes e fazer uma matrícula de demonstração.</Text>
       <View style={styles.heroCard}>
         <View style={styles.heroIconWrap}>
-          <Sparkles size={18} color="#5b4ef5" />
+          <Sparkles accessible={false} importantForAccessibility="no" size={18} color="#4f46e5" />
         </View>
         <Text style={styles.heroLabel}>Seu caminho de aprendizado</Text>
         <Text style={styles.heroTitle}>Aprenda com trilhas estruturadas</Text>
         <Text style={styles.heroSubtitle}>Descubra cursos pensados para te levar da base ao próximo nível com clareza e progressão real.</Text>
-        <Action style={styles.primaryButton} onPress={() => onOpenCourse(courses[0].id)}>
+        <Action style={styles.primaryButton} onPress={() => onOpenCourse(courses[0].id)} accessibilityLabel={`Ver curso em destaque: ${courses[0].title}`}>
           <Text style={styles.primaryButtonText}>Ver curso em destaque</Text>
         </Action>
       </View>
 
       <View style={styles.searchBar}>
-        <Search size={16} color="#9ca3af" />
-        <TextInput accessibilityLabel="Buscar cursos" placeholder="Buscar cursos" placeholderTextColor="#4b5563" value={query} onChangeText={setQuery} style={styles.searchInput} />
+        <Search accessible={false} importantForAccessibility="no" size={16} color="#6b7280" />
+        <TextInput accessibilityLabel="Buscar cursos" accessibilityHint="Digite um nome ou assunto. Os resultados são atualizados automaticamente." returnKeyType="search" placeholder="Buscar cursos" placeholderTextColor="#4b5563" value={query} onChangeText={setQuery} style={styles.searchInput} />
       </View>
 
       <View style={styles.chipRow}>
         {['Todos', 'Mobile', 'Backend', 'UI/UX'].map((item) => (
-          <Action key={item} accessibilityLabel={`Filtrar: ${item}`} accessibilityState={{ selected: item === category }} onPress={() => setCategory(item)} style={[styles.chip, item === category && styles.chipActive]}>
+          <Action key={item} accessibilityLabel={`Filtrar cursos por ${item}`} accessibilityHint="Atualiza a lista de cursos exibidos" accessibilityState={{ selected: item === category }} onPress={() => setCategory(item)} style={[styles.chip, item === category && styles.chipActive]}>
             <Text style={[styles.chipText, item === category && styles.chipTextActive]}>{item}</Text>
           </Action>
         ))}
@@ -197,7 +248,7 @@ function HomeScreen({ onOpenCourse, query, setQuery, category, setCategory }) {
           <Action key={track.id} style={styles.trackCard} accessibilityLabel={`Explorar trilha ${track.name}`} onPress={() => { setQuery(''); setCategory(track.id === 1 ? 'Mobile' : track.id === 2 ? 'Backend' : 'UI/UX'); }}>
             <View style={styles.trackHeader}>
               <View style={[styles.trackBadge, { backgroundColor: track.color }]}>
-                <Icon size={16} color="#fff" />
+                <Icon accessible={false} importantForAccessibility="no" size={16} color="#fff" />
               </View>
               <Text style={styles.trackMeta}>1 curso disponível</Text>
             </View>
@@ -208,21 +259,23 @@ function HomeScreen({ onOpenCourse, query, setQuery, category, setCategory }) {
       })}
 
       <Text accessibilityRole="header" style={styles.sectionTitle}>Cursos disponíveis</Text>
-      <Text accessibilityLiveRegion="polite" style={styles.description}>{visibleCourses.length} curso(s) encontrado(s) — {category}</Text>
+      <Text style={styles.description}>{visibleCourses.length} curso(s) encontrado(s) — {category}</Text>
+      <Text accessibilityLiveRegion={Platform.OS === 'web' ? 'polite' : 'none'} style={searchFeedback ? styles.description : { height: 0 }}>{searchFeedback}</Text>
       {visibleCourses.length === 0 && <View style={styles.progressCard}><Text style={styles.description}>Nenhum curso encontrado. Tente outro termo ou limpe os filtros.</Text><Action style={styles.secondaryButton} onPress={() => { setQuery(''); setCategory('Todos'); }}><Text style={styles.secondaryButtonText}>Limpar filtros</Text></Action></View>}
       {visibleCourses.map((course) => (
         <Action
           key={course.id}
           style={styles.courseCard}
-          accessibilityLabel={`Ver curso: ${course.title}`}
+          accessibilityLabel={`Ver curso: ${course.title}, categoria ${course.category}, avaliação ${course.rating}, duração ${course.duration}, preço ${course.price}`}
+          accessibilityHint="Abre os detalhes do curso"
           onPress={() => onOpenCourse(course.id)}
         >
-          <Image accessible={false} accessibilityIgnoresInvertColors source={{ uri: course.image }} style={styles.courseImage} />
+          <Image accessible={false} importantForAccessibility="no" accessibilityIgnoresInvertColors source={{ uri: course.image }} style={styles.courseImage} />
           <View style={styles.courseContent}>
             <View style={styles.courseTopRow}>
               <Text style={styles.courseCategory}>{course.category}</Text>
               <View style={styles.ratingPill}>
-                <Star size={10} color="#f59e0b" fill="#f59e0b" />
+                <Star accessible={false} importantForAccessibility="no" size={10} color="#b45309" fill="#b45309" />
                 <Text style={styles.metaText}>{course.rating}</Text>
               </View>
             </View>
@@ -230,7 +283,7 @@ function HomeScreen({ onOpenCourse, query, setQuery, category, setCategory }) {
             <Text style={styles.courseAuthor}>por {course.author}</Text>
             <View style={styles.courseMetaRow}>
               <View style={styles.metaInfo}>
-                <Clock3 size={12} color="#6b7280" />
+                <Clock3 accessible={false} importantForAccessibility="no" size={12} color="#4b5563" />
                 <Text style={styles.metaText}>{course.duration}</Text>
               </View>
               <Text style={styles.coursePrice}>{course.price}</Text>
@@ -245,22 +298,22 @@ function HomeScreen({ onOpenCourse, query, setQuery, category, setCategory }) {
 function DetailsScreen({ course, onEnroll, enrolled, completed, onComplete }) {
   return (
     <View>
-      <Image accessible={false} accessibilityIgnoresInvertColors source={{ uri: course.image }} style={styles.detailsImage} />
+      <Image accessibilityLabel={`Imagem ilustrativa do curso ${course.title}`} accessibilityIgnoresInvertColors source={{ uri: course.image }} style={styles.detailsImage} />
       <Text style={styles.detailsCategory}>{course.category}</Text>
       <Text style={styles.detailsTitle}>{course.title}</Text>
       <Text style={styles.detailsAuthor}>Instrutor: {course.author}</Text>
 
       <View style={styles.ratingRow}>
         <View style={styles.metaInfo}>
-          <Star size={12} color="#f59e0b" fill="#f59e0b" />
+          <Star accessible={false} importantForAccessibility="no" size={12} color="#b45309" fill="#b45309" />
           <Text style={styles.metaText}>{course.rating}</Text>
         </View>
         <View style={styles.metaInfo}>
-          <Users size={12} color="#6b7280" />
+          <Users accessible={false} importantForAccessibility="no" size={12} color="#4b5563" />
           <Text style={styles.metaText}>{course.students} alunos</Text>
         </View>
         <View style={styles.metaInfo}>
-          <Clock3 size={12} color="#6b7280" />
+          <Clock3 accessible={false} importantForAccessibility="no" size={12} color="#4b5563" />
           <Text style={styles.metaText}>{course.duration}</Text>
         </View>
       </View>
@@ -275,7 +328,7 @@ function DetailsScreen({ course, onEnroll, enrolled, completed, onComplete }) {
             <Text style={styles.moduleNumber}>{index + 1}</Text>
           </View>
           <Text style={styles.moduleText}>{module}</Text>
-          {enrolled && <Action accessibilityLabel={`${completed.includes(index) ? 'Concluído' : 'Concluir módulo'}: ${module}`} accessibilityState={{ disabled: completed.includes(index) }} disabled={completed.includes(index)} style={styles.chip} onPress={() => onComplete(index)}><Text>{completed.includes(index) ? '✓ Concluído' : 'Concluir'}</Text></Action>}
+          {enrolled && <Action accessibilityLabel={`${completed.includes(index) ? 'Concluído' : 'Concluir módulo'}: ${module}`} accessibilityHint="Atualiza o progresso do curso" accessibilityState={{ disabled: completed.includes(index), checked: completed.includes(index) }} disabled={completed.includes(index)} style={styles.chip} onPress={() => onComplete(index)}><Text>{completed.includes(index) ? '✓ Concluído' : 'Concluir'}</Text></Action>}
         </View>
       ))}
 
@@ -284,7 +337,7 @@ function DetailsScreen({ course, onEnroll, enrolled, completed, onComplete }) {
           <Text style={styles.priceLabel}>Preço</Text>
           <Text style={styles.priceText}>{course.price}</Text>
         </View>
-        <Action style={styles.primaryButton} onPress={onEnroll}>
+        <Action style={styles.primaryButton} onPress={onEnroll} accessibilityLabel={enrolled ? `Ver progresso do curso ${course.title}` : `Matricular-se no curso ${course.title} em modo demonstração`}>
           <Text style={styles.primaryButtonText}>{enrolled ? 'Ver meu progresso' : 'Matricular-se (demo)'}</Text>
         </Action>
       </View>
@@ -292,13 +345,13 @@ function DetailsScreen({ course, onEnroll, enrolled, completed, onComplete }) {
   );
 }
 
-function ProgressScreen({ enrolled, completed, onOpenCourse, onExplore }) {
+function ProgressScreen({ enrolled, completed, onOpenCourse, onExplore, onRemove }) {
   const learning = courses.filter(course => enrolled.includes(course.id));
   const percentage = course => Math.round(((completed[course.id] || []).length / course.modules.length) * 100);
   const average = learning.length ? Math.round(learning.reduce((total, course) => total + percentage(course), 0) / learning.length) : 0;
   return <View>
     <Text accessibilityRole="header" style={styles.sectionTitle}>Meu progresso</Text>
-    <Text style={styles.description}>Demonstração: matrículas e conclusões ficam disponíveis durante esta sessão.</Text>
+    <Text style={styles.description}>Matrículas e conclusões são salvas neste dispositivo, inclusive após fechar o aplicativo.</Text>
     <View style={styles.summaryRow}>
       <View style={styles.summaryCard}><Text style={styles.summaryValue}>{learning.length}</Text><Text style={styles.summaryLabel}>cursos matriculados</Text></View>
       <View style={styles.summaryCard}><Text style={styles.summaryValue}>{average}%</Text><Text style={styles.summaryLabel}>progresso médio</Text></View>
@@ -307,9 +360,24 @@ function ProgressScreen({ enrolled, completed, onOpenCourse, onExplore }) {
     {learning.map(course => <View key={course.id} style={styles.progressCard}>
       <Text style={styles.progressTitle}>{course.title}</Text>
       <Text style={styles.description}>{percentage(course)}% concluído</Text>
-      <View accessibilityRole="progressbar" accessibilityLabel={`Progresso em ${course.title}`} accessibilityValue={{ min: 0, max: 100, now: percentage(course) }} style={styles.progressBarBackground}><View style={[styles.progressBarFill, { width: `${percentage(course)}%` }]} /></View>
+      <View accessible accessibilityRole="progressbar" accessibilityLabel={`Progresso em ${course.title}`} accessibilityValue={{ min: 0, max: 100, now: percentage(course) }} style={styles.progressBarBackground}><View style={[styles.progressBarFill, { width: `${percentage(course)}%` }]} /></View>
       <Action style={[styles.secondaryButton, { marginTop: 16 }]} onPress={() => onOpenCourse(course.id)} accessibilityLabel={`Abrir módulos de ${course.title}`}><Text style={styles.secondaryButtonText}>Abrir módulos</Text></Action>
+      <Action style={[styles.secondaryButton, { marginTop: 12 }]} accessibilityLabel={`Remover matrícula e progresso de ${course.title}`} onPress={() => onRemove(course.id)}><Text style={styles.secondaryButtonText}>Remover matrícula e progresso</Text></Action>
     </View>)}
+  </View>;
+}
+
+function HelpScreen({ onExplore }) {
+  return <View>
+    <Text accessibilityRole="header" style={styles.sectionTitle}>Navegar com VoiceOver</Text>
+    <Text style={styles.description}>No iPhone, ative o VoiceOver em Ajustes, Acessibilidade. Com ele ativo, deslize um dedo para a direita ou esquerda para percorrer os elementos. Toque duas vezes para ativar o item selecionado. Deslize três dedos para rolar a página. Você pode pedir à Siri para desativar o VoiceOver.</Text>
+    <Text accessibilityRole="header" style={styles.sectionTitle}>Encontrar um curso</Text>
+    <Text style={styles.description}>Na tela Início, use Buscar cursos ou escolha uma categoria. Os resultados aparecem após as trilhas populares. Selecione um curso para abrir os detalhes.</Text>
+    <Text accessibilityRole="header" style={styles.sectionTitle}>Matricular-se e acompanhar</Text>
+    <Text style={styles.description}>Nos detalhes, encontre Matricular-se após a lista de módulos. A matrícula é uma demonstração, sem cobrança. Na tela Progresso, selecione Abrir módulos e depois Concluir no módulo desejado. Os dados são salvos neste dispositivo. Remover matrícula e progresso exclui a matrícula e as conclusões daquele curso.</Text>
+    <Text accessibilityRole="header" style={styles.sectionTitle}>Voltar e trocar de tela</Text>
+    <Text style={styles.description}>Use Voltar no topo para retornar à tela anterior. As abas Início, Curso, Progresso e Planos ficam ao final da tela. Esta ajuda pode ser aberta novamente em Como usar o aplicativo.</Text>
+    <Action style={styles.primaryButton} onPress={onExplore}><Text style={styles.primaryButtonText}>Explorar cursos</Text></Action>
   </View>;
 }
 
@@ -321,11 +389,11 @@ function PlansScreen({ selectedId, onSelect }) {
         <View key={plan.id} style={styles.planCard}>
           <View style={styles.planHeader}>
             <Text style={styles.planName}>{plan.name}</Text>
-            <BadgeCheck size={18} color="#5b4ef5" />
+            <BadgeCheck accessible={false} importantForAccessibility="no" size={18} color="#4f46e5" />
           </View>
           <Text style={styles.planPrice}>{plan.price}</Text>
           <Text style={styles.planDescription}>{plan.description}</Text>
-          <Action style={styles.secondaryButton} accessibilityLabel={`Selecionar plano ${plan.name} (demonstração)`} accessibilityState={{ selected: selectedId === plan.id }} onPress={() => onSelect(plan)}>
+          <Action style={styles.secondaryButton} accessibilityLabel={`Selecionar plano ${plan.name} em modo demonstração`} accessibilityHint="Marca o plano como selecionado sem realizar cobrança" accessibilityState={{ selected: selectedId === plan.id }} onPress={() => onSelect(plan)}>
             <Text style={styles.secondaryButtonText}>{selectedId === plan.id ? '✓ Plano selecionado' : 'Escolher plano (demo)'}</Text>
           </Action>
         </View>
@@ -335,6 +403,18 @@ function PlansScreen({ selectedId, onSelect }) {
 }
 
 const styles = StyleSheet.create({
+  touchTarget: {
+    minHeight: 48,
+    minWidth: 48,
+    justifyContent: 'center',
+  },
+  focusRing: {
+    borderWidth: 2,
+    borderColor: '#111827',
+  },
+  disabledControl: {
+    opacity: 0.6,
+  },
   screenHeading: { fontSize: 22, fontWeight: '700', color: '#111827', paddingHorizontal: 20, marginBottom: 12 },
   feedback: { backgroundColor: '#dcfce7', color: '#14532d', padding: 16, marginHorizontal: 20, marginBottom: 12, borderRadius: 12, fontSize: 16 },
   searchInput: { flex: 1, minHeight: 48, color: '#111827', fontSize: 16 },
